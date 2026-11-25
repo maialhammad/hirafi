@@ -1,0 +1,384 @@
+rules_version = '2';
+
+// Hirafi - Firestore Security Rules
+// Source of truth for field names: Hirafi data model guide (docs/data_model.md)
+//
+// Roles live in users/{uid}.role (customer | craftsman | admin).
+// An admin account is created by hand from the Firebase Console (change role there).
+// Rules block banned/suspended users from every WRITE (read of own users doc stays open
+// so the app can show "your account is banned").
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+
+    function myData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isAdmin()  { return signedIn() && myData().role == 'admin'; }
+    function isActive() { return signedIn() && myData().status == 'active'; }
+
+    // keys that changed in this write (update only)
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // booking data before / after this write (works inside the same batch/transaction)
+    function bookingNow(id) {
+      return get(/databases/$(database)/documents/bookings/$(id)).data;
+    }
+    function bookingAfter(id) {
+      return getAfter(/databases/$(database)/documents/bookings/$(id)).data;
+    }
+
+    // bookingSlots document id: craftsmanUid_YYYY-MM-DD_hour
+    function slotKey(craftsmanUid, date, hour) {
+      return craftsmanUid + '_' + date + '_' + string(hour);
+    }
+
+    // ------------------------------------------------------------------
+    // users
+    // ------------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if signedIn() && (uid() == userId || isAdmin());
+
+      // self registration: cannot become admin, must start active
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasAll(['name', 'email', 'role', 'status'])
+        && request.resource.data.keys().hasOnly(['name', 'email', 'phone', 'city', 'role',
+             'status', 'language', 'photoUrl', 'fcmTokens', 'createdAt', 'updatedAt'])
+        
+        && request.resource.data.role in ['customer', 'craftsman']
+        && request.resource.data.status == 'active';
+
+      // owner edits profile, but never role / status / createdAt
+      allow update: if isActive() && uid() == userId
+        && !changedKeys().hasAny(['role', 'status', 'createdAt']);
+
+      // admin: ban / suspend / edit anyone
+      allow update: if isAdmin();
+
+      // accounts are never deleted, they are banned
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // craftsmen (public profile)
+    // ------------------------------------------------------------------
+    match /craftsmen/{userId} {
+      // customers only see approved craftsmen (queries must filter approved == true)
+      allow read: if signedIn()
+        && (resource.data.approved == true || uid() == userId || isAdmin());
+
+      allow create: if isActive() && uid() == userId
+        && getAfter(/databases/$(database)/documents/users/$(userId)).data.role == 'craftsman'
+        && request.resource.data.keys().hasAll(['name', 'city', 'categoryIds', 'pricePerHour',
+             'verificationStatus', 'approved', 'rating', 'ratingCount', 'ratingSum'])
+        && request.resource.data.approved == false
+        && request.resource.data.verificationStatus == 'pending'
+        && request.resource.data.rating == 0
+        && request.resource.data.ratingCount == 0
+        && request.resource.data.ratingSum == 0
+        && request.resource.data.categoryIds.size() >= 1;
+
+      // (1) craftsman edits own profile, never the protected fields
+      allow update: if isActive() && uid() == userId
+        && !changedKeys().hasAny(['approved', 'verificationStatus', 'rejectionReason',
+          'approvedAt', 'rating', 'ratingCount', 'ratingSum', 'lastReviewId', 'createdAt']);
+
+      // (2) rejected craftsman re-submits for review
+      allow update: if isActive() && uid() == userId
+        && resource.data.verificationStatus == 'rejected'
+        && request.resource.data.verificationStatus == 'pending'
+        && changedKeys().hasOnly(['verificationStatus', 'updatedAt']);
+
+      // (3) a customer adds a review: only the rating aggregates may change,
+      //     and a matching review document must be written in the same transaction
+      allow update: if isActive()
+        && changedKeys().hasOnly(['rating', 'ratingCount', 'ratingSum', 'lastReviewId', 'updatedAt'])
+        && request.resource.data.ratingCount == resource.data.ratingCount + 1
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && getAfter(/databases/$(database)/documents/reviews/$(request.resource.data.lastReviewId)).data.customerUid == uid()
+        && getAfter(/databases/$(database)/documents/reviews/$(request.resource.data.lastReviewId)).data.craftsmanUid == userId
+        && request.resource.data.ratingSum == resource.data.ratingSum
+             + getAfter(/databases/$(database)/documents/reviews/$(request.resource.data.lastReviewId)).data.rating;
+
+      // (4) admin approves / rejects / edits
+      allow update, delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // verifications (private: national id) - owner + admin only
+    // ------------------------------------------------------------------
+    
+match /verifications/{userId} {
+  allow read: if signedIn() && (uid() == userId || isAdmin());
+
+  allow create: if isActive()
+    && uid() == userId
+    && get(/databases/$(database)/documents/users/$(userId)).data.role == 'craftsman'
+    && request.resource.data.keys().hasAll(['nationalId', 'submittedAt'])
+    && request.resource.data.keys().hasOnly(['nationalId', 'submittedAt'])
+    && request.resource.data.nationalId is string
+    && request.resource.data.nationalId.matches('^[0-9]{10}$')
+    && request.resource.data.submittedAt == request.time;
+
+  allow update, delete: if isAdmin();
+}
+
+
+    // ------------------------------------------------------------------
+    // categories
+    // ------------------------------------------------------------------
+    match /categories/{categoryId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // bookings
+    // ------------------------------------------------------------------
+    match /bookings/{bookingId}  {
+
+      allow read: if signedIn()
+        && (uid() == resource.data.customerUid
+            || uid() == resource.data.craftsmanUid
+            || isAdmin());
+
+      // customer creates a pending booking; its first slot lock must be written in the same transaction
+      allow create: if isActive()
+        && myData().role == 'customer'
+        && request.resource.data.keys().hasOnly(['customerUid', 'customerName', 'craftsmanUid',
+             'craftsmanName', 'categoryId', 'serviceName', 'date', 'hour', 'durationHours',
+             'startAt', 'location', 'note', 'pricePerHour', 'totalPrice', 'paymentMethod',
+             'status', 'cancelledBy', 'cancelReason', 'rescheduleCount', 'reviewed',
+             'createdAt', 'updatedAt', 'acceptedAt', 'completedAt', 'cancelledAt'])
+        && request.resource.data.customerUid == uid()
+        && request.resource.data.craftsmanUid != uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.paymentMethod == 'cash'
+        && request.resource.data.rescheduleCount == 0
+        && request.resource.data.reviewed == false
+        && request.resource.data.date is string
+        && request.resource.data.hour is int
+        && request.resource.data.hour >= 0
+        && request.resource.data.durationHours is int
+        && request.resource.data.durationHours >= 1
+        && request.resource.data.durationHours <= 8
+        && request.resource.data.hour + request.resource.data.durationHours <= 24
+        && request.resource.data.startAt > request.time
+        && get(/databases/$(database)/documents/craftsmen/$(request.resource.data.craftsmanUid)).data.approved == true
+        && get(/databases/$(database)/documents/craftsmen/$(request.resource.data.craftsmanUid)).data.verificationStatus == 'approved'
+        && existsAfter(/databases/$(database)/documents/bookingSlots/$(slotKey(
+             request.resource.data.craftsmanUid, request.resource.data.date, request.resource.data.hour)));
+
+      // craftsman: pending -> accepted | rejected, accepted -> cancelled | completed
+      allow update: if isActive()
+        && uid() == resource.data.craftsmanUid
+        && get(/databases/$(database)/documents/craftsmen/$(resource.data.craftsmanUid)).data.approved == true
+        && get(/databases/$(database)/documents/craftsmen/$(resource.data.craftsmanUid)).data.verificationStatus == 'approved'
+        && changedKeys().hasOnly(['status', 'updatedAt', 'acceptedAt', 'completedAt',
+             'cancelledAt', 'cancelledBy', 'cancelReason'])
+        && (
+          (resource.data.status == 'pending'
+             && request.resource.data.status in ['accepted', 'rejected'])
+          || (resource.data.status == 'accepted'
+             && request.resource.data.status == 'cancelled'
+             && request.resource.data.cancelledBy == 'craftsman')
+          || (resource.data.status == 'accepted'
+             && request.resource.data.status == 'completed'
+             && request.time >= resource.data.startAt)
+        );
+
+      // customer: cancel a pending / accepted booking
+      allow update: if isActive() && uid() == resource.data.customerUid
+        && changedKeys().hasOnly(['status', 'updatedAt', 'cancelledAt', 'cancelledBy', 'cancelReason'])
+        && resource.data.status in ['pending', 'accepted']
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.cancelledBy == 'customer';
+
+      // customer: reschedule (goes back to pending, new slot lock written in the same transaction)
+      allow update: if isActive() && uid() == resource.data.customerUid
+        && changedKeys().hasOnly(['date', 'hour', 'startAt', 'status', 'rescheduleCount',
+             'updatedAt', 'acceptedAt'])
+        && resource.data.status in ['pending', 'accepted']
+        && request.resource.data.status == 'pending'
+        && request.resource.data.rescheduleCount == resource.data.rescheduleCount + 1
+        && request.resource.data.startAt > request.time
+        && request.resource.data.date is string
+        && request.resource.data.hour is int
+        && request.resource.data.hour >= 0
+        && request.resource.data.hour + resource.data.durationHours <= 24
+        && request.resource.data.hour + resource.data.durationHours <= 24
+        && existsAfter(/databases/$(database)/documents/bookingSlots/$(slotKey(
+             resource.data.craftsmanUid, request.resource.data.date, request.resource.data.hour)));
+
+      // customer: mark as reviewed (review doc must be created in the same transaction)
+      allow update: if isActive() && uid() == resource.data.customerUid
+        && changedKeys().hasOnly(['reviewed', 'updatedAt'])
+        && resource.data.status == 'completed'
+        && request.resource.data.reviewed == true
+        && existsAfter(/databases/$(database)/documents/reviews/$(bookingId));
+
+      // admin: dispute handling
+      allow update: if isAdmin();
+
+      // bookings are history, never deleted
+      allow delete: if false;
+
+      // ---------------- chat ----------------
+      match /messages/{messageId} {
+        function parent() {
+          return get(/databases/$(database)/documents/bookings/$(bookingId)).data;
+        }
+
+        allow read: if signedIn()
+          && (uid() == parent().customerUid || uid() == parent().craftsmanUid || isAdmin());
+
+        allow create: if isActive()
+          && (uid() == parent().customerUid || uid() == parent().craftsmanUid)
+          && parent().status in ['pending', 'accepted']
+          && request.resource.data.keys().hasOnly(['senderUid', 'text', 'createdAt'])
+          
+          && request.resource.data.senderUid == uid()
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time;
+
+        allow update, delete: if false;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // bookingSlots: one lock document per booked hour
+    // (create-only: creating an id that already exists is an update, which is denied)
+    // ------------------------------------------------------------------
+    match /bookingSlots/{slotId} {
+      allow read: if signedIn();
+
+      allow create: if isActive()
+  && request.resource.data.keys().hasAll([
+    'craftsmanUid', 'date', 'hour', 'bookingId', 'createdAt'
+  ])
+  && request.resource.data.keys().hasOnly([
+    'craftsmanUid', 'date', 'hour', 'bookingId', 'createdAt'
+  ])
+  && request.resource.data.date is string
+  && request.resource.data.hour is int
+  && request.resource.data.hour >= 0
+  && request.resource.data.hour <= 23
+  && request.resource.data.createdAt == request.time
+             + bookingAfter(request.resource.data.bookingId).durationHours;
+
+      allow update: if false;
+
+      // release a lock when the booking is rejected / cancelled, or moved to another time
+      allow delete: if isActive()
+        && (uid() == bookingNow(resource.data.bookingId).customerUid
+            || uid() == bookingNow(resource.data.bookingId).craftsmanUid)
+        && (
+          bookingAfter(resource.data.bookingId).status in ['rejected', 'cancelled']
+          || bookingAfter(resource.data.bookingId).date != resource.data.date
+          || resource.data.hour < bookingAfter(resource.data.bookingId).hour
+          || resource.data.hour >= bookingAfter(resource.data.bookingId).hour
+               + bookingAfter(resource.data.bookingId).durationHours
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // reviews: id == bookingId, so only one review per booking
+    // ------------------------------------------------------------------
+    match /reviews/{reviewId} {
+      allow read: if signedIn();
+
+      allow create: if isActive()
+        && request.resource.data.keys().hasOnly(['bookingId', 'customerUid', 'customerName',
+             'craftsmanUid', 'rating', 'comment', 'createdAt'])
+        && request.resource.data.bookingId == reviewId
+        && request.resource.data.customerUid == uid()
+        && request.resource.data.craftsmanUid == bookingNow(reviewId).craftsmanUid
+        && bookingNow(reviewId).customerUid == uid()
+        && bookingNow(reviewId).status == 'completed'
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5;
+
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // notifications
+    // ------------------------------------------------------------------
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && resource.data.toUid == uid();
+
+      // an admin can notify anyone; everybody else only the other side of a booking they share
+      allow create: if isActive()
+        && request.resource.data.fromUid == uid()
+        && request.resource.data.toUid != uid()
+        && request.resource.data.read == false
+        && (
+          isAdmin()
+          || (request.resource.data.bookingId is string
+              && (
+                (bookingAfter(request.resource.data.bookingId).customerUid == uid()
+                  && bookingAfter(request.resource.data.bookingId).craftsmanUid == request.resource.data.toUid)
+                || (bookingAfter(request.resource.data.bookingId).craftsmanUid == uid()
+                  && bookingAfter(request.resource.data.bookingId).customerUid == request.resource.data.toUid)
+              ))
+        );
+
+      // the receiver can only flip "read"
+      allow update: if isActive() && resource.data.toUid == uid()
+        && request.resource.data.read == true
+        && changedKeys().hasOnly(['read']);
+        
+       allow delete: if isActive() && resource.data.toUid == uid();
+    }
+
+    // ------------------------------------------------------------------
+    // complaints
+    // ------------------------------------------------------------------
+    match /complaints/{complaintId} {
+      allow read: if signedIn() && (resource.data.reporterUid == uid() || isAdmin());
+
+      allow create: if isActive()
+        && request.resource.data.reporterUid == uid()
+        && request.resource.data.status == 'open'
+        && request.resource.data.description is string
+        && request.resource.data.description.size() >= 10
+        && request.resource.data.description.size() <= 1000;
+
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // activityLogs: written by the app for critical actions, read by admin only
+    // ------------------------------------------------------------------
+    match /activityLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if signedIn()
+        && request.resource.data.actorUid == uid()
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // settings (settings/app)
+    // ------------------------------------------------------------------
+    match /settings/{settingId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

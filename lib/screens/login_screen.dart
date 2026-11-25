@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'signup_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'home_screen.dart';
-
+import 'craftsman_profile_setup_screen.dart';
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -20,6 +20,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool obscurePassword = true;
 
   
+
+
 Future<void> login() async {
   if (emailController.text.trim().isEmpty ||
       passwordController.text.isEmpty) {
@@ -38,23 +40,71 @@ Future<void> login() async {
       password: passwordController.text,
     );
 
-    final userDoc = await FirebaseFirestore.instance
+    final firebaseUser = credential.user;
+
+    if (firebaseUser == null) {
+      throw Exception('Unable to identify user');
+    }
+
+    final db = FirebaseFirestore.instance;
+
+    final userDoc = await db
         .collection('users')
-        .doc(credential.user!.uid)
+        .doc(firebaseUser.uid)
         .get();
 
     if (!userDoc.exists) {
+      await FirebaseAuth.instance.signOut();
       throw Exception('User profile not found');
     }
 
     final userData = userDoc.data()!;
     final role = userData['role'];
-    final fullName = userData['fullName'] ?? 'User';
+    final fullName = userData['name'] ?? 'User';
+    final status = userData['status'];
+
+    if (status != 'active') {
+      await FirebaseAuth.instance.signOut();
+      throw Exception('Your account is not active');
+    }
 
     if (role != 'customer' &&
         role != 'craftsman' &&
         role != 'admin') {
+      await FirebaseAuth.instance.signOut();
       throw Exception('Invalid user role');
+    }
+
+    String effectiveRole = role;
+
+    if (role == 'craftsman') {
+      final craftsmanDoc = await db
+          .collection('craftsmen')
+          .doc(firebaseUser.uid)
+          .get();
+
+      if (!mounted) return;
+
+      // Craftsman has not completed professional profile
+      if (!craftsmanDoc.exists) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                const CraftsmanProfileSetupScreen(),
+          ),
+        );
+        return;
+      }
+
+      final craftsmanData = craftsmanDoc.data()!;
+
+      final isApproved =
+          craftsmanData['approved'] == true &&
+          craftsmanData['verificationStatus'] == 'approved';
+
+      // Pending or rejected craftsman uses customer interface
+      effectiveRole = isApproved ? 'craftsman' : 'customer';
     }
 
     if (!mounted) return;
@@ -63,20 +113,20 @@ Future<void> login() async {
       context,
       MaterialPageRoute(
         builder: (context) => HomeScreen(
-          role: role,
+          role: effectiveRole,
           fullName: fullName,
         ),
       ),
     );
-  }  on FirebaseAuthException catch (e) {
-  if (!mounted) return;
+  } on FirebaseAuthException catch (e) {
+    if (!mounted) return;
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('Error: ${e.code} - ${e.message}'),
-    ),
-  );
-}  catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: ${e.code} - ${e.message}'),
+      ),
+    );
+  } catch (e) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(

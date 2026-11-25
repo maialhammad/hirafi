@@ -18,60 +18,86 @@ class _SignupScreenState extends State<SignupScreen> {
   String selectedRole = 'customer';
   bool isLoading = false;
 
-  Future<void> signup() async {
-    if (nameController.text.trim().isEmpty ||
-        emailController.text.trim().isEmpty ||
-        passwordController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
-      );
-      return;
+  
+
+Future<void> signup() async {
+  if (nameController.text.trim().isEmpty ||
+      emailController.text.trim().isEmpty ||
+      passwordController.text.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please fill in all fields')),
+    );
+    return;
+  }
+
+  setState(() => isLoading = true);
+
+  User? newUser;
+
+  try {
+    final credential = await FirebaseAuth.instance
+        .createUserWithEmailAndPassword(
+      email: emailController.text.trim(),
+      password: passwordController.text,
+    );
+
+    newUser = credential.user;
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(newUser!.uid)
+        .set({
+      'name': nameController.text.trim(),
+      'email': emailController.text.trim(),
+      'role': selectedRole,
+      'status': 'active',
+      'language': 'ar',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await FirebaseAuth.instance.signOut();
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          selectedRole == 'craftsman'
+              ? 'Account created! Please log in to complete your professional profile.'
+              : 'Account created successfully!',
+        ),
+      ),
+    );
+
+    Navigator.pop(context);
+
+  } on FirebaseAuthException catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(e.message ?? 'Registration failed')),
+    );
+
+  } catch (e) {
+    if (newUser != null) {
+      try {
+       await newUser.delete();
+      } catch (_) {}
     }
 
-    setState(() => isLoading = true);
+    if (!mounted) return;
 
-    try {
-      final credential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
-        email: emailController.text.trim(),
-        password: passwordController.text,
-      );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Something went wrong: $e')),
+    );
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(credential.user!.uid)
-          .set({
-        'fullName': nameController.text.trim(),
-        'email': emailController.text.trim(),
-        'role': selectedRole,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Account created successfully')),
-      );
-
-      Navigator.pop(context);
-    } on FirebaseAuthException catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? 'Registration failed')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Something went wrong: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+  } finally {
+    if (mounted) {
+      setState(() => isLoading = false);
     }
   }
+}
 
   @override
   void dispose() {
@@ -160,26 +186,7 @@ class _SignupScreenState extends State<SignupScreen> {
   ),
 ),
 
-            RadioGroup<String>(
-  groupValue: selectedRole,
-  onChanged: (value) {
-    setState(() {
-      selectedRole = value!;
-    });
-  },
-  child: Column(
-    children: [
-      RadioListTile<String>(
-        title: const Text('Customer'),
-        value: 'customer',
-      ),
-      RadioListTile<String>(
-        title: const Text('Craftsman'),
-        value: 'craftsman',
-      ),
-    ],
-  ),
-),
+            
 
             const SizedBox(height: 20),
 
