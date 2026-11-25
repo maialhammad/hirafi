@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../core/db_constants.dart';
 import 'home_screen.dart';
 
 class CraftsmanProfileSetupScreen extends StatefulWidget {
@@ -134,15 +135,15 @@ class _CraftsmanProfileSetupScreenState
       final db = FirebaseFirestore.instance;
       final uid = currentUser.uid;
 
-      final userRef = db.collection('users').doc(uid);
-      final craftsmanRef = db.collection('craftsmen').doc(uid);
-      final verificationRef = db.collection('verifications').doc(uid);
+      final userRef = db.collection(Col.users).doc(uid);
+      final craftsmanRef = db.collection(Col.craftsmen).doc(uid);
+      final verificationRef = db.collection(Col.verifications).doc(uid);
 
       final userDoc = await userRef.get();
 
       if (!userDoc.exists ||
-          userDoc.data()?['role'] != 'craftsman' ||
-          userDoc.data()?['status'] != 'active') {
+          userDoc.data()?[Field.role] != Role.craftsman ||
+          userDoc.data()?[Field.status] != UserStatus.active) {
         throw Exception('This account is not an active craftsman account');
       }
 
@@ -152,32 +153,32 @@ class _CraftsmanProfileSetupScreenState
         throw Exception('Your professional profile already exists');
       }
 
-      final name = userDoc.data()?['name'] ?? '';
+      final name = userDoc.data()?[Field.name] ?? '';
 
       final batch = db.batch();
 
       batch.update(userRef, {
-        'phone': phone,
-        'updatedAt': FieldValue.serverTimestamp(),
+        Field.phone: phone,
+        Field.updatedAt: FieldValue.serverTimestamp(),
       });
 
       batch.set(craftsmanRef, {
-        'name': name,
-        'city': city,
-        'categoryIds': selectedCategories.toList(),
-        'pricePerHour': price,
-        'verificationStatus': 'pending',
-        'approved': false,
-        'rating': 0.0,
-        'ratingCount': 0,
-        'ratingSum': 0.0,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
+        Field.name: name,
+        Field.city: city,
+        Field.categoryIds: selectedCategories.toList(),
+        Field.pricePerHour: price,
+        Field.verificationStatus: VerificationStatus.pending,
+        Field.approved: false,
+        Field.rating: 0.0,
+        Field.ratingCount: 0,
+        Field.ratingSum: 0.0,
+        Field.createdAt: FieldValue.serverTimestamp(),
+        Field.updatedAt: FieldValue.serverTimestamp(),
       });
 
       batch.set(verificationRef, {
-        'nationalId': nationalId,
-        'submittedAt': FieldValue.serverTimestamp(),
+        Field.nationalId: nationalId,
+        Field.submittedAt: FieldValue.serverTimestamp(),
       });
 
       await batch.commit();
@@ -196,7 +197,7 @@ class _CraftsmanProfileSetupScreenState
         context,
         MaterialPageRoute(
           builder: (context) => HomeScreen(
-            role: 'customer',
+            role: Role.customer,
             fullName: name,
           ),
         ),

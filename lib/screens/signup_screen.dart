@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/db_constants.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -15,7 +16,7 @@ class _SignupScreenState extends State<SignupScreen> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
 
-  String selectedRole = 'customer';
+  String selectedRole = Role.customer;
   bool isLoading = false;
 
   
@@ -33,6 +34,7 @@ Future<void> signup() async {
   setState(() => isLoading = true);
 
   User? newUser;
+  bool profileCreated = false;
 
   try {
     final credential = await FirebaseAuth.instance
@@ -44,17 +46,19 @@ Future<void> signup() async {
     newUser = credential.user;
 
     await FirebaseFirestore.instance
-        .collection('users')
+        .collection(Col.users)
         .doc(newUser!.uid)
         .set({
-      'name': nameController.text.trim(),
-      'email': emailController.text.trim(),
-      'role': selectedRole,
-      'status': 'active',
-      'language': 'ar',
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      Field.name: nameController.text.trim(),
+      Field.email: emailController.text.trim(),
+      Field.role: selectedRole,
+      Field.status: UserStatus.active,
+      Field.language: Lang.ar,
+      Field.createdAt: FieldValue.serverTimestamp(),
+      Field.updatedAt: FieldValue.serverTimestamp(),
     });
+
+    profileCreated = true;
 
     await FirebaseAuth.instance.signOut();
 
@@ -63,7 +67,7 @@ Future<void> signup() async {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          selectedRole == 'craftsman'
+          selectedRole == Role.craftsman
               ? 'Account created! Please log in to complete your professional profile.'
               : 'Account created successfully!',
         ),
@@ -73,6 +77,10 @@ Future<void> signup() async {
     Navigator.pop(context);
 
   } on FirebaseAuthException catch (e) {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -80,11 +88,15 @@ Future<void> signup() async {
     );
 
   } catch (e) {
-    if (newUser != null) {
+    if (newUser != null && !profileCreated) {
       try {
-       await newUser.delete();
+        await newUser.delete();
       } catch (_) {}
     }
+
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
 
     if (!mounted) return;
 
@@ -176,11 +188,11 @@ Future<void> signup() async {
     children: [
       RadioListTile<String>(
         title: const Text('Customer'),
-        value: 'customer',
+        value: Role.customer,
       ),
       RadioListTile<String>(
         title: const Text('Craftsman'),
-        value: 'craftsman',
+        value: Role.craftsman,
       ),
     ],
   ),

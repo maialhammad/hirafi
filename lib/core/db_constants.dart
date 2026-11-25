@@ -16,7 +16,95 @@ abstract class Col {
   static const complaints = 'complaints';
   static const activityLogs = 'activityLogs';
   static const settings = 'settings'; // single document: settings/app
+}
 
+/// Firestore field names used by the app and security rules.
+/// Keep this aligned with firestore.rules and firestore.indexes.json.
+abstract class Field {
+  // users
+  static const name = 'name';
+  static const email = 'email';
+  static const phone = 'phone';
+  static const city = 'city';
+  static const role = 'role';
+  static const status = 'status';
+  static const language = 'language';
+  static const photoUrl = 'photoUrl';
+  static const fcmTokens = 'fcmTokens';
+  static const createdAt = 'createdAt';
+  static const updatedAt = 'updatedAt';
+
+  // craftsmen
+  static const bio = 'bio';
+  static const services = 'services';
+  static const experienceYears = 'experienceYears';
+  static const pricePerHour = 'pricePerHour';
+  static const priceMax = 'priceMax';
+  static const isAvailableNow = 'isAvailableNow';
+  static const weeklySchedule = 'weeklySchedule';
+  static const blockedDates = 'blockedDates';
+  static const categoryIds = 'categoryIds';
+  static const verificationStatus = 'verificationStatus';
+  static const approved = 'approved';
+  static const rejectionReason = 'rejectionReason';
+  static const approvedAt = 'approvedAt';
+  static const rating = 'rating';
+  static const ratingCount = 'ratingCount';
+  static const ratingSum = 'ratingSum';
+  static const lastReviewId = 'lastReviewId';
+
+  // verifications
+  static const nationalId = 'nationalId';
+  static const submittedAt = 'submittedAt';
+
+  // categories
+  static const nameAr = 'nameAr';
+  static const nameEn = 'nameEn';
+  static const icon = 'icon';
+  static const order = 'order';
+  static const active = 'active';
+
+  // bookings
+  static const bookingId = 'bookingId';
+  static const customerUid = 'customerUid';
+  static const customerName = 'customerName';
+  static const craftsmanUid = 'craftsmanUid';
+  static const craftsmanName = 'craftsmanName';
+  static const categoryId = 'categoryId';
+  static const serviceName = 'serviceName';
+  static const date = 'date';
+  static const hour = 'hour';
+  static const durationHours = 'durationHours';
+  static const startAt = 'startAt';
+  static const location = 'location';
+  static const note = 'note';
+  static const totalPrice = 'totalPrice';
+  static const paymentMethod = 'paymentMethod';
+  static const cancelledBy = 'cancelledBy';
+  static const cancelReason = 'cancelReason';
+  static const rescheduleCount = 'rescheduleCount';
+  static const reviewed = 'reviewed';
+  static const acceptedAt = 'acceptedAt';
+  static const completedAt = 'completedAt';
+  static const cancelledAt = 'cancelledAt';
+
+  // chat / reviews / notifications / complaints / logs
+  static const senderUid = 'senderUid';
+  static const text = 'text';
+  static const comment = 'comment';
+  static const fromUid = 'fromUid';
+  static const toUid = 'toUid';
+  static const read = 'read';
+  static const type = 'type';
+  static const reporterUid = 'reporterUid';
+  static const description = 'description';
+  static const actorUid = 'actorUid';
+  static const action = 'action';
+
+  // settings/app
+  static const inactivityTimeoutMinutes = 'inactivityTimeoutMinutes';
+  static const maxAdvanceBookingDays = 'maxAdvanceBookingDays';
+  static const maintenanceMode = 'maintenanceMode';
 }
 
 abstract class Role {

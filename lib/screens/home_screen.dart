@@ -1,6 +1,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../core/db_constants.dart';
+import 'login_screen.dart';
 import 'profile_screen.dart';
 
 const Color orange = Color(0xFFFF6B35);
@@ -20,14 +22,17 @@ class HomeScreen extends StatelessWidget {
   Future<void> logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
 
-    if (context.mounted) {
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    }
+    if (!context.mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   List<Map<String, dynamic>> get features {
     switch (role) {
-      case 'customer':
+      case Role.customer:
         return [
           {'title': 'ابحث عن حرفي', 'icon': Icons.search},
           {'title': 'جميع الخدمات', 'icon': Icons.home_repair_service},
@@ -36,7 +41,7 @@ class HomeScreen extends StatelessWidget {
           {'title': 'تقييماتي', 'icon': Icons.star},
         ];
 
-      case 'craftsman':
+      case Role.craftsman:
         return [
           {'title': 'طلبات الخدمة', 'icon': Icons.assignment},
           {'title': 'المواعيد', 'icon': Icons.event},
@@ -45,7 +50,7 @@ class HomeScreen extends StatelessWidget {
           {'title': 'تقييمات العملاء', 'icon': Icons.star},
         ];
 
-      case 'admin':
+      case Role.admin:
         return [
           {'title': 'إدارة العملاء', 'icon': Icons.people},
           {'title': 'إدارة الحرفيين', 'icon': Icons.engineering},
@@ -61,11 +66,11 @@ class HomeScreen extends StatelessWidget {
 
   String get roleTitle {
     switch (role) {
-      case 'customer':
+      case Role.customer:
         return 'العميل';
-      case 'craftsman':
+      case Role.craftsman:
         return 'الحرفي';
-      case 'admin':
+      case Role.admin:
         return 'مدير النظام';
       default:
         return 'مستخدم';
@@ -151,7 +156,7 @@ class HomeScreen extends StatelessWidget {
 
                 const SizedBox(height: 22),
 
-                if (role == 'customer') ...[
+                if (role == Role.customer) ...[
                   // Orange banner
                   Container(
                     width: double.infinity,
@@ -257,7 +262,7 @@ class HomeScreen extends StatelessWidget {
                 ],
 
                 Text(
-                  role == 'customer'
+                  role == Role.customer
                       ? 'خدماتك'
                       : 'لوحة التحكم',
                   style: const TextStyle(

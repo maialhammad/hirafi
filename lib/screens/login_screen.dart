@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'signup_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/db_constants.dart';
 import 'home_screen.dart';
 import 'craftsman_profile_setup_screen.dart';
 class LoginScreen extends StatefulWidget {
@@ -49,7 +50,7 @@ Future<void> login() async {
     final db = FirebaseFirestore.instance;
 
     final userDoc = await db
-        .collection('users')
+        .collection(Col.users)
         .doc(firebaseUser.uid)
         .get();
 
@@ -59,27 +60,27 @@ Future<void> login() async {
     }
 
     final userData = userDoc.data()!;
-    final role = userData['role'];
-    final fullName = userData['name'] ?? 'User';
-    final status = userData['status'];
+    final role = userData[Field.role];
+    final fullName = userData[Field.name] ?? 'User';
+    final status = userData[Field.status];
 
-    if (status != 'active') {
+    if (status != UserStatus.active) {
       await FirebaseAuth.instance.signOut();
       throw Exception('Your account is not active');
     }
 
-    if (role != 'customer' &&
-        role != 'craftsman' &&
-        role != 'admin') {
+    if (role != Role.customer &&
+        role != Role.craftsman &&
+        role != Role.admin) {
       await FirebaseAuth.instance.signOut();
       throw Exception('Invalid user role');
     }
 
     String effectiveRole = role;
 
-    if (role == 'craftsman') {
+    if (role == Role.craftsman) {
       final craftsmanDoc = await db
-          .collection('craftsmen')
+          .collection(Col.craftsmen)
           .doc(firebaseUser.uid)
           .get();
 
@@ -100,11 +101,12 @@ Future<void> login() async {
       final craftsmanData = craftsmanDoc.data()!;
 
       final isApproved =
-          craftsmanData['approved'] == true &&
-          craftsmanData['verificationStatus'] == 'approved';
+          craftsmanData[Field.approved] == true &&
+          craftsmanData[Field.verificationStatus] ==
+              VerificationStatus.approved;
 
       // Pending or rejected craftsman uses customer interface
-      effectiveRole = isApproved ? 'craftsman' : 'customer';
+      effectiveRole = isApproved ? Role.craftsman : Role.customer;
     }
 
     if (!mounted) return;

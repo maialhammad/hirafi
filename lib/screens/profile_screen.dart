@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/db_constants.dart';
+import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String fullName;
@@ -29,11 +31,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String get roleTitle {
     switch (widget.role) {
-      case 'customer':
+      case Role.customer:
         return 'عميل';
-      case 'craftsman':
+      case Role.craftsman:
         return 'حرفي';
-      case 'admin':
+      case Role.admin:
         return 'مدير النظام';
       default:
         return 'مستخدم';
@@ -83,9 +85,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       await FirebaseFirestore.instance
-          .collection('users')
+          .collection(Col.users)
           .doc(user.uid)
-          .update({'fullName': newName});
+          .update({
+        Field.name: newName,
+        Field.updatedAt: FieldValue.serverTimestamp(),
+      });
 
       if (!mounted) return;
 
@@ -180,10 +185,11 @@ Future<void> refreshEmail() async {
 
     if (updatedUser != null && updatedUser.email != null) {
       await FirebaseFirestore.instance
-          .collection('users')
+          .collection(Col.users)
           .doc(updatedUser.uid)
           .update({
-        'email': updatedUser.email,
+        Field.email: updatedUser.email,
+        Field.updatedAt: FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
@@ -208,9 +214,12 @@ Future<void> refreshEmail() async {
   Future<void> logout() async {
     await FirebaseAuth.instance.signOut();
 
-    if (mounted) {
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    }
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   Widget profileItem({
