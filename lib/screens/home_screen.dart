@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../core/db_constants.dart';
 import 'login_screen.dart';
 import 'profile_screen.dart';
+import 'bookings_screen.dart';
+import '../services/create_booking_screen.dart';
 
 const Color orange = Color(0xFFFF6B35);
 const Color dark = Color(0xFF292929);
@@ -86,6 +88,32 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  void openFeature(BuildContext context, IconData featureIcon, String title) {
+    if (featureIcon == Icons.calendar_month && role == Role.customer) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CreateBookingScreen(customerName: fullName),
+        ),
+      );
+      return;
+    }
+
+    if (featureIcon == Icons.assignment) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookingsScreen(
+            role: role,
+            customerName: fullName,
+          ),
+        ),
+      );
+      return;
+    }
+
+    showMessage(context, title);
+  }
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -318,8 +346,9 @@ class HomeScreen extends StatelessWidget {
                         size: 16,
                         color: Colors.grey,
                       ),
-                      onTap: () => showMessage(
+                      onTap: () => openFeature(
                         context,
+                        feature['icon'] as IconData,
                         feature['title'] as String,
                       ),
                     ),
